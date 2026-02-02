@@ -1,3 +1,4 @@
+
 <!DOCTYPE html>
 <html lang="en">
 <head>
@@ -106,10 +107,12 @@
         }
     </script>
 
+    <!-- Lucide Icons -->
+    <script src="https://unpkg.com/lucide@latest/dist/umd/lucide.js"></script>
+
     <!-- React App -->
     <script type="text/babel">
         const { useState, useEffect } = React;
-        const { Bell, BellOff, RefreshCw, ExternalLink, Search, AlertCircle, CheckCircle, Clock } = lucide;
 
         const CryptoRegulatoryTracker = () => {
           const [notifications, setNotifications] = useState([]);
@@ -137,26 +140,26 @@
             checkNotificationPermission();
           }, []);
 
-          const loadStoredData = async () => {
+          const loadStoredData = () => {
             try {
-              const prefsResult = await window.storage.get('notification_prefs');
-              if (prefsResult) {
-                setNotificationPrefs(JSON.parse(prefsResult.value));
+              const prefsData = localStorage.getItem('notification_prefs');
+              if (prefsData) {
+                setNotificationPrefs(JSON.parse(prefsData));
               }
 
-              const monitoringResult = await window.storage.get('is_monitoring');
-              if (monitoringResult) {
-                setIsMonitoring(JSON.parse(monitoringResult.value));
+              const monitoringData = localStorage.getItem('is_monitoring');
+              if (monitoringData) {
+                setIsMonitoring(JSON.parse(monitoringData));
               }
 
-              const notifResult = await window.storage.get('notifications');
-              if (notifResult) {
-                setNotifications(JSON.parse(notifResult.value));
+              const notifData = localStorage.getItem('notifications');
+              if (notifData) {
+                setNotifications(JSON.parse(notifData));
               }
 
-              const lastCheckResult = await window.storage.get('last_checked');
-              if (lastCheckResult) {
-                setLastChecked(new Date(lastCheckResult.value));
+              const lastCheckData = localStorage.getItem('last_checked');
+              if (lastCheckData) {
+                setLastChecked(new Date(lastCheckData));
               }
             } catch (error) {
               console.log('No stored data found, starting fresh');
@@ -178,9 +181,9 @@
             return false;
           };
 
-          const saveToStorage = async (key, value) => {
+          const saveToStorage = (key, value) => {
             try {
-              await window.storage.set(key, JSON.stringify(value));
+              localStorage.setItem(key, JSON.stringify(value));
             } catch (error) {
               console.error('Storage error:', error);
             }
@@ -266,7 +269,7 @@
 
               setSearchResults(allResults);
               setLastChecked(currentTime);
-              await saveToStorage('last_checked', currentTime.toISOString());
+              saveToStorage('last_checked', currentTime.toISOString());
 
               if (allResults.length > 0 && hasPermission) {
                 const newNotifs = allResults.map(result => ({
@@ -279,7 +282,7 @@
 
                 const updatedNotifs = [...newNotifs, ...notifications].slice(0, 50);
                 setNotifications(updatedNotifs);
-                await saveToStorage('notifications', updatedNotifs);
+                saveToStorage('notifications', updatedNotifs);
 
                 if (newNotifs.length > 0) {
                   new Notification('New Crypto Regulatory Updates', {
@@ -308,25 +311,25 @@
             
             const newState = !isMonitoring;
             setIsMonitoring(newState);
-            await saveToStorage('is_monitoring', newState);
+            saveToStorage('is_monitoring', newState);
             
             if (newState) {
               searchRegulatory();
             }
           };
 
-          const updatePreferences = async (key, value) => {
+          const updatePreferences = (key, value) => {
             const updated = { ...notificationPrefs, [key]: value };
             setNotificationPrefs(updated);
-            await saveToStorage('notification_prefs', updated);
+            saveToStorage('notification_prefs', updated);
           };
 
-          const markAsRead = async (id) => {
+          const markAsRead = (id) => {
             const updated = notifications.map(n => 
               n.id === id ? { ...n, read: true } : n
             );
             setNotifications(updated);
-            await saveToStorage('notifications', updated);
+            saveToStorage('notifications', updated);
           };
 
           const unreadCount = notifications.filter(n => !n.read).length;
@@ -397,7 +400,7 @@
                       justifyContent: 'center'
                     }}
                   >
-                    {isMonitoring ? React.createElement(Bell, { size: 18 }) : React.createElement(BellOff, { size: 18 })}
+                    <i data-lucide={isMonitoring ? "bell" : "bell-off"} style={{ width: '18px', height: '18px' }}></i>
                     {isMonitoring ? 'Monitoring Active' : 'Start Monitoring'}
                   </button>
                 </div>
@@ -485,21 +488,21 @@
                         fontFamily: "'IBM Plex Mono', monospace"
                       }}
                     >
-                      {React.createElement(RefreshCw, { size: 16, className: isLoading ? 'spin' : '' })}
+                      <i data-lucide="refresh-cw" className={isLoading ? 'spin' : ''} style={{ width: '16px', height: '16px' }}></i>
                       Check Now
                     </button>
                   </div>
 
                   {isLoading && (
                     <div style={{ textAlign: 'center', padding: '40px', color: '#9aa0a6' }}>
-                      {React.createElement(RefreshCw, { size: 32, style: { animation: 'spin 1s linear infinite' } })}
+                      <i data-lucide="refresh-cw" className="spin" style={{ width: '32px', height: '32px' }}></i>
                       <p>Searching for updates...</p>
                     </div>
                   )}
 
                   {!isLoading && searchResults.length === 0 && (
                     <div style={{ textAlign: 'center', padding: '40px', color: '#9aa0a6' }}>
-                      {React.createElement(Search, { size: 48, style: { opacity: 0.3, marginBottom: '16px' } })}
+                      <i data-lucide="search" style={{ width: '48px', height: '48px', opacity: 0.3, marginBottom: '16px' }}></i>
                       <p>No updates found. Click "Check Now" to search.</p>
                     </div>
                   )}
@@ -569,7 +572,7 @@
                             gap: '6px'
                           }}
                         >
-                          Read More {React.createElement(ExternalLink, { size: 14 })}
+                          Read More <i data-lucide="external-link" style={{ width: '14px', height: '14px' }}></i>
                         </a>
                       )}
                     </div>
@@ -600,7 +603,7 @@
                         alignItems: 'start',
                         gap: '8px'
                       }}>
-                        {React.createElement(AlertCircle, { size: 16, style: { flexShrink: 0, marginTop: '2px' } })}
+                        <i data-lucide="alert-circle" style={{ width: '16px', height: '16px', flexShrink: 0, marginTop: '2px' }}></i>
                         <span>Enable browser notifications to receive alerts</span>
                       </div>
                     )}
@@ -701,10 +704,7 @@
                             }}
                           >
                             <div style={{ display: 'flex', alignItems: 'center', gap: '8px', marginBottom: '6px' }}>
-                              {notif.read ? 
-                                React.createElement(CheckCircle, { size: 14, style: { color: '#9aa0a6' } }) : 
-                                React.createElement(Clock, { size: 14, style: { color: '#00d4ff' } })
-                              }
+                              <i data-lucide={notif.read ? "check-circle" : "clock"} style={{ width: '14px', height: '14px', color: notif.read ? '#9aa0a6' : '#00d4ff' }}></i>
                               <span style={{
                                 fontSize: '11px',
                                 color: notif.read ? '#9aa0a6' : '#00d4ff',
@@ -748,16 +748,32 @@
           );
         };
 
-        ReactDOM.render(
-          React.createElement(CryptoRegulatoryTracker),
-          document.getElementById('root')
-        );
-    </script>
-    
-    <!-- Lucide Icons -->
-    <script src="https://unpkg.com/lucide@latest"></script>
-    <script>
-        lucide.createIcons();
+        // Wait for DOM to be ready
+        if (document.readyState === 'loading') {
+          document.addEventListener('DOMContentLoaded', initApp);
+        } else {
+          initApp();
+        }
+
+        function initApp() {
+          ReactDOM.render(
+            React.createElement(CryptoRegulatoryTracker),
+            document.getElementById('root')
+          );
+          
+          // Initialize Lucide icons
+          if (window.lucide) {
+            lucide.createIcons();
+            // Re-create icons whenever React re-renders
+            const observer = new MutationObserver(() => {
+              lucide.createIcons();
+            });
+            observer.observe(document.getElementById('root'), {
+              childList: true,
+              subtree: true
+            });
+          }
+        }
     </script>
 </body>
-</html> 
+</html>
