@@ -1,0 +1,763 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover">
+    
+    <!-- PWA Meta Tags -->
+    <title>Crypto Regulatory Tracker</title>
+    <meta name="description" content="Monitor UK FCA & US SEC/CFTC cryptocurrency regulatory updates in real-time">
+    <meta name="theme-color" content="#0a0e27">
+    
+    <!-- iOS Specific Meta Tags -->
+    <meta name="apple-mobile-web-app-capable" content="yes">
+    <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+    <meta name="apple-mobile-web-app-title" content="Crypto Tracker">
+    
+    <!-- Icons -->
+    <link rel="icon" type="image/png" sizes="192x192" href="icon-192.png">
+    <link rel="icon" type="image/png" sizes="512x512" href="icon-512.png">
+    <link rel="apple-touch-icon" href="icon-192.png">
+    
+    <!-- Manifest -->
+    <link rel="manifest" href="manifest.json">
+    
+    <!-- React and Babel for JSX -->
+    <script crossorigin src="https://unpkg.com/react@18/umd/react.production.min.js"></script>
+    <script crossorigin src="https://unpkg.com/react-dom@18/umd/react-dom.production.min.js"></script>
+    <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
+    
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+        
+        body {
+            margin: 0;
+            padding: 0;
+            overflow-x: hidden;
+            -webkit-font-smoothing: antialiased;
+            -moz-osx-font-smoothing: grayscale;
+        }
+        
+        #root {
+            width: 100%;
+            min-height: 100vh;
+        }
+        
+        /* iOS Safe Area Support */
+        @supports (padding: max(0px)) {
+            body {
+                padding-left: max(0px, env(safe-area-inset-left));
+                padding-right: max(0px, env(safe-area-inset-right));
+                padding-bottom: max(0px, env(safe-area-inset-bottom));
+            }
+        }
+        
+        /* Loading Screen */
+        .loading-screen {
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            justify-content: center;
+            height: 100vh;
+            background: linear-gradient(135deg, #0a0e27 0%, #1a1f3a 50%, #0f1419 100%);
+            color: #e8eaed;
+            font-family: 'IBM Plex Mono', monospace;
+        }
+        
+        .loading-spinner {
+            width: 48px;
+            height: 48px;
+            border: 4px solid rgba(0, 212, 255, 0.2);
+            border-top-color: #00d4ff;
+            border-radius: 50%;
+            animation: spin 1s linear infinite;
+            margin-bottom: 16px;
+        }
+        
+        @keyframes spin {
+            to { transform: rotate(360deg); }
+        }
+    </style>
+</head>
+<body>
+    <div id="root">
+        <div class="loading-screen">
+            <div class="loading-spinner"></div>
+            <div>Loading Crypto Tracker...</div>
+        </div>
+    </div>
+
+    <!-- Service Worker Registration -->
+    <script>
+        if ('serviceWorker' in navigator) {
+            window.addEventListener('load', () => {
+                navigator.serviceWorker.register('service-worker.js')
+                    .then(registration => {
+                        console.log('ServiceWorker registered:', registration.scope);
+                    })
+                    .catch(err => {
+                        console.log('ServiceWorker registration failed:', err);
+                    });
+            });
+        }
+    </script>
+
+    <!-- React App -->
+    <script type="text/babel">
+        const { useState, useEffect } = React;
+        const { Bell, BellOff, RefreshCw, ExternalLink, Search, AlertCircle, CheckCircle, Clock } = lucide;
+
+        const CryptoRegulatoryTracker = () => {
+          const [notifications, setNotifications] = useState([]);
+          const [isMonitoring, setIsMonitoring] = useState(false);
+          const [lastChecked, setLastChecked] = useState(null);
+          const [searchResults, setSearchResults] = useState([]);
+          const [isLoading, setIsLoading] = useState(false);
+          const [notificationPrefs, setNotificationPrefs] = useState({
+            uk: true,
+            us: true,
+            email: '',
+            frequency: 'hourly'
+          });
+          const [hasPermission, setHasPermission] = useState(false);
+          const [isMobile, setIsMobile] = useState(false);
+
+          // Detect mobile on mount
+          useEffect(() => {
+            setIsMobile(/iPhone|iPad|iPod|Android/i.test(navigator.userAgent));
+          }, []);
+
+          // Load preferences and monitoring state on mount
+          useEffect(() => {
+            loadStoredData();
+            checkNotificationPermission();
+          }, []);
+
+          const loadStoredData = async () => {
+            try {
+              const prefsResult = await window.storage.get('notification_prefs');
+              if (prefsResult) {
+                setNotificationPrefs(JSON.parse(prefsResult.value));
+              }
+
+              const monitoringResult = await window.storage.get('is_monitoring');
+              if (monitoringResult) {
+                setIsMonitoring(JSON.parse(monitoringResult.value));
+              }
+
+              const notifResult = await window.storage.get('notifications');
+              if (notifResult) {
+                setNotifications(JSON.parse(notifResult.value));
+              }
+
+              const lastCheckResult = await window.storage.get('last_checked');
+              if (lastCheckResult) {
+                setLastChecked(new Date(lastCheckResult.value));
+              }
+            } catch (error) {
+              console.log('No stored data found, starting fresh');
+            }
+          };
+
+          const checkNotificationPermission = () => {
+            if ('Notification' in window) {
+              setHasPermission(Notification.permission === 'granted');
+            }
+          };
+
+          const requestNotificationPermission = async () => {
+            if ('Notification' in window) {
+              const permission = await Notification.requestPermission();
+              setHasPermission(permission === 'granted');
+              return permission === 'granted';
+            }
+            return false;
+          };
+
+          const saveToStorage = async (key, value) => {
+            try {
+              await window.storage.set(key, JSON.stringify(value));
+            } catch (error) {
+              console.error('Storage error:', error);
+            }
+          };
+
+          const searchRegulatory = async () => {
+            setIsLoading(true);
+            const currentTime = new Date();
+            
+            try {
+              const ukResponse = await fetch("https://api.anthropic.com/v1/messages", {
+                method: "POST",
+                headers: {
+                  "Content-Type": "application/json",
+                },
+                body: JSON.stringify({
+                  model: "claude-sonnet-4-20250514",
+                  max_tokens: 1000,
+                  messages: [
+                    { 
+                      role: "user", 
+                      content: notificationPrefs.uk 
+                        ? "Search for the latest UK FCA cryptocurrency and digital asset regulatory updates from the past week. Include the title, date, and a brief summary of each update. Format as JSON array with fields: title, date, source, summary, url"
+                        : "Return empty array"
+                    }
+                  ],
+                  tools: notificationPrefs.uk ? [{ type: "web_search_20250305", name: "web_search" }] : []
+                })
+              });
+
+              const ukData = await ukResponse.json();
+              
+              const usResponse = await fetch("https://api.anthropic.com/v1/messages", {
+                method: "POST",
+                headers: {
+                  "Content-Type": "application/json",
+                },
+                body: JSON.stringify({
+                  model: "claude-sonnet-4-20250514",
+                  max_tokens: 1000,
+                  messages: [
+                    { 
+                      role: "user", 
+                      content: notificationPrefs.us
+                        ? "Search for the latest US SEC and CFTC cryptocurrency and digital asset regulatory updates from the past week. Include the title, date, and a brief summary. Format as JSON array with fields: title, date, source, summary, url"
+                        : "Return empty array"
+                    }
+                  ],
+                  tools: notificationPrefs.us ? [{ type: "web_search_20250305", name: "web_search" }] : []
+                })
+              });
+
+              const usData = await usResponse.json();
+
+              const ukText = ukData.content?.find(c => c.type === 'text')?.text || '[]';
+              const usText = usData.content?.find(c => c.type === 'text')?.text || '[]';
+              
+              let ukResults = [];
+              let usResults = [];
+              
+              try {
+                const ukCleaned = ukText.replace(/```json|```/g, '').trim();
+                ukResults = JSON.parse(ukCleaned);
+              } catch (e) {
+                console.log('UK parsing issue');
+              }
+              
+              try {
+                const usCleaned = usText.replace(/```json|```/g, '').trim();
+                usResults = JSON.parse(usCleaned);
+              } catch (e) {
+                console.log('US parsing issue');
+              }
+
+              const allResults = [
+                ...(Array.isArray(ukResults) ? ukResults : []),
+                ...(Array.isArray(usResults) ? usResults : [])
+              ].map(item => ({
+                ...item,
+                id: Math.random().toString(36).substr(2, 9),
+                timestamp: currentTime.toISOString()
+              }));
+
+              setSearchResults(allResults);
+              setLastChecked(currentTime);
+              await saveToStorage('last_checked', currentTime.toISOString());
+
+              if (allResults.length > 0 && hasPermission) {
+                const newNotifs = allResults.map(result => ({
+                  id: result.id,
+                  title: result.title || 'New Regulatory Update',
+                  source: result.source || 'Regulatory Authority',
+                  timestamp: currentTime.toISOString(),
+                  read: false
+                }));
+
+                const updatedNotifs = [...newNotifs, ...notifications].slice(0, 50);
+                setNotifications(updatedNotifs);
+                await saveToStorage('notifications', updatedNotifs);
+
+                if (newNotifs.length > 0) {
+                  new Notification('New Crypto Regulatory Updates', {
+                    body: `${newNotifs.length} new update(s) found`,
+                    icon: 'icon-192.png',
+                    tag: 'crypto-regulatory'
+                  });
+                }
+              }
+
+            } catch (error) {
+              console.error('Search error:', error);
+            }
+            
+            setIsLoading(false);
+          };
+
+          const toggleMonitoring = async () => {
+            if (!isMonitoring && !hasPermission) {
+              const granted = await requestNotificationPermission();
+              if (!granted) {
+                alert('Please enable notifications to use monitoring');
+                return;
+              }
+            }
+            
+            const newState = !isMonitoring;
+            setIsMonitoring(newState);
+            await saveToStorage('is_monitoring', newState);
+            
+            if (newState) {
+              searchRegulatory();
+            }
+          };
+
+          const updatePreferences = async (key, value) => {
+            const updated = { ...notificationPrefs, [key]: value };
+            setNotificationPrefs(updated);
+            await saveToStorage('notification_prefs', updated);
+          };
+
+          const markAsRead = async (id) => {
+            const updated = notifications.map(n => 
+              n.id === id ? { ...n, read: true } : n
+            );
+            setNotifications(updated);
+            await saveToStorage('notifications', updated);
+          };
+
+          const unreadCount = notifications.filter(n => !n.read).length;
+
+          return (
+            <div style={{
+              minHeight: '100vh',
+              background: 'linear-gradient(135deg, #0a0e27 0%, #1a1f3a 50%, #0f1419 100%)',
+              fontFamily: "'IBM Plex Mono', monospace",
+              color: '#e8eaed',
+              padding: isMobile ? '16px' : '20px',
+              paddingBottom: isMobile ? '32px' : '20px'
+            }}>
+              <div style={{
+                maxWidth: '1200px',
+                margin: '0 auto',
+                background: 'rgba(255, 255, 255, 0.03)',
+                borderRadius: '16px',
+                border: '1px solid rgba(255, 255, 255, 0.08)',
+                padding: isMobile ? '20px' : '32px',
+                marginBottom: '24px',
+                boxShadow: '0 8px 32px rgba(0, 0, 0, 0.4)'
+              }}>
+                <div style={{ 
+                  display: 'flex', 
+                  flexDirection: isMobile ? 'column' : 'row',
+                  alignItems: isMobile ? 'flex-start' : 'center', 
+                  justifyContent: 'space-between', 
+                  marginBottom: '24px',
+                  gap: isMobile ? '16px' : '0'
+                }}>
+                  <div>
+                    <h1 style={{
+                      fontSize: isMobile ? '24px' : '32px',
+                      fontWeight: '700',
+                      margin: '0 0 8px 0',
+                      background: 'linear-gradient(135deg, #00d4ff 0%, #00ff88 100%)',
+                      WebkitBackgroundClip: 'text',
+                      WebkitTextFillColor: 'transparent',
+                      letterSpacing: '-0.5px'
+                    }}>
+                      Crypto Regulatory Tracker
+                    </h1>
+                    <p style={{ margin: 0, color: '#9aa0a6', fontSize: isMobile ? '13px' : '14px' }}>
+                      Monitor UK FCA & US SEC/CFTC updates
+                    </p>
+                  </div>
+                  
+                  <button
+                    onClick={toggleMonitoring}
+                    style={{
+                      background: isMonitoring 
+                        ? 'linear-gradient(135deg, #00ff88 0%, #00d4ff 100%)' 
+                        : 'rgba(255, 255, 255, 0.05)',
+                      border: 'none',
+                      borderRadius: '12px',
+                      padding: isMobile ? '10px 20px' : '12px 24px',
+                      color: isMonitoring ? '#0a0e27' : '#e8eaed',
+                      cursor: 'pointer',
+                      fontSize: '14px',
+                      fontWeight: '600',
+                      display: 'flex',
+                      alignItems: 'center',
+                      gap: '8px',
+                      transition: 'all 0.3s ease',
+                      fontFamily: "'IBM Plex Mono', monospace",
+                      width: isMobile ? '100%' : 'auto',
+                      justifyContent: 'center'
+                    }}
+                  >
+                    {isMonitoring ? React.createElement(Bell, { size: 18 }) : React.createElement(BellOff, { size: 18 })}
+                    {isMonitoring ? 'Monitoring Active' : 'Start Monitoring'}
+                  </button>
+                </div>
+
+                <div style={{
+                  display: 'grid',
+                  gridTemplateColumns: isMobile ? '1fr' : 'repeat(auto-fit, minmax(200px, 1fr))',
+                  gap: '16px',
+                  marginTop: '24px'
+                }}>
+                  <div style={{
+                    background: 'rgba(0, 212, 255, 0.1)',
+                    border: '1px solid rgba(0, 212, 255, 0.3)',
+                    borderRadius: '8px',
+                    padding: '16px'
+                  }}>
+                    <div style={{ color: '#00d4ff', fontSize: '12px', marginBottom: '4px' }}>Status</div>
+                    <div style={{ fontSize: '18px', fontWeight: '600' }}>
+                      {isMonitoring ? 'Active' : 'Paused'}
+                    </div>
+                  </div>
+                  
+                  <div style={{
+                    background: 'rgba(0, 255, 136, 0.1)',
+                    border: '1px solid rgba(0, 255, 136, 0.3)',
+                    borderRadius: '8px',
+                    padding: '16px'
+                  }}>
+                    <div style={{ color: '#00ff88', fontSize: '12px', marginBottom: '4px' }}>Unread Alerts</div>
+                    <div style={{ fontSize: '18px', fontWeight: '600' }}>{unreadCount}</div>
+                  </div>
+                  
+                  <div style={{
+                    background: 'rgba(255, 255, 255, 0.05)',
+                    border: '1px solid rgba(255, 255, 255, 0.1)',
+                    borderRadius: '8px',
+                    padding: '16px'
+                  }}>
+                    <div style={{ color: '#9aa0a6', fontSize: '12px', marginBottom: '4px' }}>Last Checked</div>
+                    <div style={{ fontSize: '18px', fontWeight: '600' }}>
+                      {lastChecked ? new Date(lastChecked).toLocaleTimeString() : 'Never'}
+                    </div>
+                  </div>
+                </div>
+              </div>
+
+              <div style={{
+                maxWidth: '1200px',
+                margin: '0 auto',
+                display: 'grid',
+                gridTemplateColumns: isMobile ? '1fr' : '1fr 400px',
+                gap: '24px'
+              }}>
+                <div style={{
+                  background: 'rgba(255, 255, 255, 0.03)',
+                  borderRadius: '16px',
+                  border: '1px solid rgba(255, 255, 255, 0.08)',
+                  padding: isMobile ? '20px' : '24px'
+                }}>
+                  <div style={{ 
+                    display: 'flex', 
+                    flexDirection: isMobile ? 'column' : 'row',
+                    justifyContent: 'space-between', 
+                    alignItems: isMobile ? 'stretch' : 'center', 
+                    marginBottom: '24px',
+                    gap: isMobile ? '12px' : '0'
+                  }}>
+                    <h2 style={{ margin: 0, fontSize: '20px', fontWeight: '600' }}>Recent Updates</h2>
+                    <button
+                      onClick={searchRegulatory}
+                      disabled={isLoading}
+                      style={{
+                        background: 'rgba(0, 212, 255, 0.1)',
+                        border: '1px solid rgba(0, 212, 255, 0.3)',
+                        borderRadius: '8px',
+                        padding: '8px 16px',
+                        color: '#00d4ff',
+                        cursor: isLoading ? 'not-allowed' : 'pointer',
+                        fontSize: '13px',
+                        fontWeight: '500',
+                        display: 'flex',
+                        alignItems: 'center',
+                        justifyContent: 'center',
+                        gap: '8px',
+                        fontFamily: "'IBM Plex Mono', monospace"
+                      }}
+                    >
+                      {React.createElement(RefreshCw, { size: 16, className: isLoading ? 'spin' : '' })}
+                      Check Now
+                    </button>
+                  </div>
+
+                  {isLoading && (
+                    <div style={{ textAlign: 'center', padding: '40px', color: '#9aa0a6' }}>
+                      {React.createElement(RefreshCw, { size: 32, style: { animation: 'spin 1s linear infinite' } })}
+                      <p>Searching for updates...</p>
+                    </div>
+                  )}
+
+                  {!isLoading && searchResults.length === 0 && (
+                    <div style={{ textAlign: 'center', padding: '40px', color: '#9aa0a6' }}>
+                      {React.createElement(Search, { size: 48, style: { opacity: 0.3, marginBottom: '16px' } })}
+                      <p>No updates found. Click "Check Now" to search.</p>
+                    </div>
+                  )}
+
+                  {searchResults.map((result, index) => (
+                    <div
+                      key={result.id || index}
+                      style={{
+                        background: 'rgba(255, 255, 255, 0.02)',
+                        border: '1px solid rgba(255, 255, 255, 0.08)',
+                        borderRadius: '12px',
+                        padding: '20px',
+                        marginBottom: '16px',
+                        transition: 'all 0.3s ease'
+                      }}
+                    >
+                      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'start', marginBottom: '12px', flexWrap: 'wrap', gap: '8px' }}>
+                        <div style={{
+                          background: result.source?.includes('UK') || result.source?.includes('FCA') 
+                            ? 'rgba(0, 212, 255, 0.15)' 
+                            : 'rgba(0, 255, 136, 0.15)',
+                          color: result.source?.includes('UK') || result.source?.includes('FCA')
+                            ? '#00d4ff' 
+                            : '#00ff88',
+                          padding: '4px 12px',
+                          borderRadius: '6px',
+                          fontSize: '11px',
+                          fontWeight: '600',
+                          textTransform: 'uppercase'
+                        }}>
+                          {result.source || 'Regulatory'}
+                        </div>
+                        <div style={{ color: '#9aa0a6', fontSize: '12px' }}>
+                          {result.date || new Date(result.timestamp).toLocaleDateString()}
+                        </div>
+                      </div>
+                      
+                      <h3 style={{
+                        margin: '0 0 12px 0',
+                        fontSize: '16px',
+                        fontWeight: '600',
+                        lineHeight: '1.4'
+                      }}>
+                        {result.title || 'Regulatory Update'}
+                      </h3>
+                      
+                      <p style={{
+                        margin: '0 0 12px 0',
+                        color: '#9aa0a6',
+                        fontSize: '13px',
+                        lineHeight: '1.6'
+                      }}>
+                        {result.summary || 'New regulatory guidance has been published.'}
+                      </p>
+                      
+                      {result.url && (
+                        <a
+                          href={result.url}
+                          target="_blank"
+                          rel="noopener noreferrer"
+                          style={{
+                            color: '#00d4ff',
+                            fontSize: '13px',
+                            textDecoration: 'none',
+                            display: 'inline-flex',
+                            alignItems: 'center',
+                            gap: '6px'
+                          }}
+                        >
+                          Read More {React.createElement(ExternalLink, { size: 14 })}
+                        </a>
+                      )}
+                    </div>
+                  ))}
+                </div>
+
+                <div style={{ display: 'flex', flexDirection: 'column', gap: '24px' }}>
+                  <div style={{
+                    background: 'rgba(255, 255, 255, 0.03)',
+                    borderRadius: '16px',
+                    border: '1px solid rgba(255, 255, 255, 0.08)',
+                    padding: isMobile ? '20px' : '24px'
+                  }}>
+                    <h3 style={{ margin: '0 0 20px 0', fontSize: '18px', fontWeight: '600' }}>
+                      Notification Settings
+                    </h3>
+
+                    {!hasPermission && (
+                      <div style={{
+                        background: 'rgba(255, 193, 7, 0.1)',
+                        border: '1px solid rgba(255, 193, 7, 0.3)',
+                        borderRadius: '8px',
+                        padding: '12px',
+                        marginBottom: '16px',
+                        fontSize: '13px',
+                        color: '#ffc107',
+                        display: 'flex',
+                        alignItems: 'start',
+                        gap: '8px'
+                      }}>
+                        {React.createElement(AlertCircle, { size: 16, style: { flexShrink: 0, marginTop: '2px' } })}
+                        <span>Enable browser notifications to receive alerts</span>
+                      </div>
+                    )}
+
+                    <div style={{ marginBottom: '16px' }}>
+                      <label style={{
+                        display: 'flex',
+                        alignItems: 'center',
+                        gap: '12px',
+                        cursor: 'pointer',
+                        padding: '12px',
+                        background: 'rgba(255, 255, 255, 0.02)',
+                        borderRadius: '8px',
+                        marginBottom: '8px'
+                      }}>
+                        <input
+                          type="checkbox"
+                          checked={notificationPrefs.uk}
+                          onChange={(e) => updatePreferences('uk', e.target.checked)}
+                          style={{ width: '18px', height: '18px', cursor: 'pointer' }}
+                        />
+                        <span style={{ fontSize: '14px' }}>UK FCA Updates</span>
+                      </label>
+
+                      <label style={{
+                        display: 'flex',
+                        alignItems: 'center',
+                        gap: '12px',
+                        cursor: 'pointer',
+                        padding: '12px',
+                        background: 'rgba(255, 255, 255, 0.02)',
+                        borderRadius: '8px'
+                      }}>
+                        <input
+                          type="checkbox"
+                          checked={notificationPrefs.us}
+                          onChange={(e) => updatePreferences('us', e.target.checked)}
+                          style={{ width: '18px', height: '18px', cursor: 'pointer' }}
+                        />
+                        <span style={{ fontSize: '14px' }}>US SEC/CFTC Updates</span>
+                      </label>
+                    </div>
+
+                    <div style={{ marginTop: '20px' }}>
+                      <label style={{ display: 'block', marginBottom: '8px', fontSize: '14px', color: '#9aa0a6' }}>
+                        Check Frequency
+                      </label>
+                      <select
+                        value={notificationPrefs.frequency}
+                        onChange={(e) => updatePreferences('frequency', e.target.value)}
+                        style={{
+                          width: '100%',
+                          padding: '12px',
+                          background: 'rgba(255, 255, 255, 0.05)',
+                          border: '1px solid rgba(255, 255, 255, 0.1)',
+                          borderRadius: '8px',
+                          color: '#e8eaed',
+                          fontSize: '14px',
+                          fontFamily: "'IBM Plex Mono', monospace",
+                          cursor: 'pointer'
+                        }}
+                      >
+                        <option value="hourly">Every Hour</option>
+                        <option value="daily">Daily</option>
+                        <option value="weekly">Weekly</option>
+                      </select>
+                    </div>
+                  </div>
+
+                  <div style={{
+                    background: 'rgba(255, 255, 255, 0.03)',
+                    borderRadius: '16px',
+                    border: '1px solid rgba(255, 255, 255, 0.08)',
+                    padding: isMobile ? '20px' : '24px'
+                  }}>
+                    <h3 style={{ margin: '0 0 16px 0', fontSize: '18px', fontWeight: '600' }}>
+                      Notification History
+                    </h3>
+
+                    {notifications.length === 0 ? (
+                      <p style={{ color: '#9aa0a6', fontSize: '13px', textAlign: 'center', padding: '20px 0' }}>
+                        No notifications yet
+                      </p>
+                    ) : (
+                      <div style={{ maxHeight: '400px', overflowY: 'auto' }}>
+                        {notifications.slice(0, 10).map((notif) => (
+                          <div
+                            key={notif.id}
+                            onClick={() => markAsRead(notif.id)}
+                            style={{
+                              padding: '12px',
+                              background: notif.read ? 'transparent' : 'rgba(0, 212, 255, 0.05)',
+                              borderRadius: '8px',
+                              marginBottom: '8px',
+                              cursor: 'pointer',
+                              border: `1px solid ${notif.read ? 'transparent' : 'rgba(0, 212, 255, 0.2)'}`,
+                              transition: 'all 0.2s ease'
+                            }}
+                          >
+                            <div style={{ display: 'flex', alignItems: 'center', gap: '8px', marginBottom: '6px' }}>
+                              {notif.read ? 
+                                React.createElement(CheckCircle, { size: 14, style: { color: '#9aa0a6' } }) : 
+                                React.createElement(Clock, { size: 14, style: { color: '#00d4ff' } })
+                              }
+                              <span style={{
+                                fontSize: '11px',
+                                color: notif.read ? '#9aa0a6' : '#00d4ff',
+                                fontWeight: '600'
+                              }}>
+                                {notif.source}
+                              </span>
+                            </div>
+                            <p style={{
+                              margin: 0,
+                              fontSize: '13px',
+                              color: notif.read ? '#9aa0a6' : '#e8eaed',
+                              lineHeight: '1.4'
+                            }}>
+                              {notif.title}
+                            </p>
+                            <div style={{ fontSize: '11px', color: '#9aa0a6', marginTop: '6px' }}>
+                              {new Date(notif.timestamp).toLocaleString()}
+                            </div>
+                          </div>
+                        ))}
+                      </div>
+                    )}
+                  </div>
+                </div>
+              </div>
+
+              <style>{`
+                @import url('https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500;600;700&display=swap');
+                
+                @keyframes spin {
+                  from { transform: rotate(0deg); }
+                  to { transform: rotate(360deg); }
+                }
+                
+                .spin {
+                  animation: spin 1s linear infinite;
+                }
+              `}</style>
+            </div>
+          );
+        };
+
+        ReactDOM.render(
+          React.createElement(CryptoRegulatoryTracker),
+          document.getElementById('root')
+        );
+    </script>
+    
+    <!-- Lucide Icons -->
+    <script src="https://unpkg.com/lucide@latest"></script>
+    <script>
+        lucide.createIcons();
+    </script>
+</body>
+</html>
